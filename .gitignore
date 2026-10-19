@@ -1,0 +1,18 @@
+# Build and distribution directories
+build/
+dist/
+
+# Tools directory
+tools/
+
+# Executables and logs
+*.exe
+*.log
+
+# Configuration
+ff7ec_config.json
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
