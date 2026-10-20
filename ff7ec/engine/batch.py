@@ -60,6 +60,7 @@ class BatchExtractionEngine:
         stop_event: Optional[threading.Event] = None,
         pause_event: Optional[threading.Event] = None,
         progress_callback: Optional[Callable] = None,
+        scan_progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> None:
         """
         High-performance parallel extraction workflow (100% read-only on source).
@@ -107,68 +108,111 @@ class BatchExtractionEngine:
 
         mapping = load_mapping_file(mapping_path, logger) if mapping_path else {}
 
+        if extract_scope == SCOPE_BUNDLES_ONLY and len(mapping) == 0:
+            logger.error("================================================================================")
+            logger.error("[ERROR] CANNOT DECRYPT ASSET BUNDLES: 'octocacheevai.json' is missing or empty!")
+            logger.error("[ERROR] Applibot XOR decryption requires logical asset names from the database.")
+            logger.error("[ERROR] Process aborted. Please click '⚡ Build Database' or run 'build-mapping' first.")
+            logger.error("================================================================================")
+            return
+
+        if extract_scope == DEFAULT_SCOPE and len(mapping) == 0:
+            logger.warning("================================================================================")
+            logger.warning("[WARNING] 'octocacheevai.json' was not found or is empty.")
+            logger.warning("[WARNING] Video and audio will be extracted, but Asset Bundles cannot be")
+            logger.warning("[WARNING] decrypted without mapping keys and will remain in raw format.")
+            logger.warning("================================================================================")
+
         logger.info(f"Step 1: Scanning source directory for asset files [Scope: {scope_name}]...")
         file_list = []
         total_size = 0
+        dirs_to_visit = [source_dir]
+        last_callback_time = time.time()
+        last_log_milestone = 0
 
-        for root, _, files in os.walk(source_dir):
-            if stop_event.is_set():
+        while dirs_to_visit:
+            if not check_pause_and_stop(pause_event, stop_event):
                 logger.warning("Scan canceled by user.")
                 return
 
-            for fname in files:
-                if fname.endswith(".meta"):
-                    continue
-                fpath = os.path.join(root, fname)
+            current_dir = dirs_to_visit.pop()
+            try:
+                with os.scandir(current_dir) as it:
+                    for entry in it:
+                        try:
+                            if entry.is_dir(follow_symlinks=False):
+                                dirs_to_visit.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                fname = entry.name
+                                if fname.endswith(".meta"):
+                                    continue
+                                fpath = entry.path
 
-                # Fast scope filtering
-                if extract_scope == SCOPE_VIDEO_ONLY:
-                    mask = mapping.get(fname.lower())
-                    if mask:
-                        if not mask.lower().endswith(".usm"):
-                            continue
-                    else:
-                        try:
-                            with open(fpath, "rb") as f_chk:
-                                if f_chk.read(4) != MAGIC_CRI_USM:
-                                    continue
-                        except Exception:
-                            continue
-                elif extract_scope == SCOPE_AUDIO_ONLY:
-                    mask = mapping.get(fname.lower())
-                    if mask:
-                        if not mask.lower().endswith((".acb", ".awb", ".acf", ".wav", ".ogg")):
-                            continue
-                    else:
-                        try:
-                            with open(fpath, "rb") as f_chk:
-                                if f_chk.read(4) not in (MAGIC_CRI_ACB, MAGIC_CRI_AWB, MAGIC_RIFF, MAGIC_OGG):
-                                    continue
-                        except Exception:
-                            continue
-                elif extract_scope == SCOPE_BUNDLES_ONLY:
-                    mask = mapping.get(fname.lower())
-                    if mask:
-                        if mask.lower().endswith((".usm", ".acb", ".awb", ".acf")):
-                            continue
-                    else:
-                        try:
-                            with open(fpath, "rb") as f_chk:
-                                hdr = f_chk.read(4)
-                                if hdr in (MAGIC_CRI_USM, MAGIC_CRI_ACB, MAGIC_CRI_AWB):
-                                    continue
-                        except Exception:
-                            continue
+                                # Fast scope filtering
+                                if extract_scope == SCOPE_VIDEO_ONLY:
+                                    mask = mapping.get(fname.lower())
+                                    if mask:
+                                        if not mask.lower().endswith(".usm"):
+                                            continue
+                                    else:
+                                        try:
+                                            with open(fpath, "rb") as f_chk:
+                                                if f_chk.read(4) != MAGIC_CRI_USM:
+                                                    continue
+                                        except Exception:
+                                            continue
+                                elif extract_scope == SCOPE_AUDIO_ONLY:
+                                    mask = mapping.get(fname.lower())
+                                    if mask:
+                                        if not mask.lower().endswith((".acb", ".awb", ".acf", ".wav", ".ogg")):
+                                            continue
+                                    else:
+                                        try:
+                                            with open(fpath, "rb") as f_chk:
+                                                if f_chk.read(4) not in (MAGIC_CRI_ACB, MAGIC_CRI_AWB, MAGIC_RIFF, MAGIC_OGG):
+                                                    continue
+                                        except Exception:
+                                            continue
+                                elif extract_scope == SCOPE_BUNDLES_ONLY:
+                                    mask = mapping.get(fname.lower())
+                                    if mask:
+                                        if mask.lower().endswith((".usm", ".acb", ".awb", ".acf")):
+                                            continue
+                                    else:
+                                        try:
+                                            with open(fpath, "rb") as f_chk:
+                                                hdr = f_chk.read(4)
+                                                if hdr in (MAGIC_CRI_USM, MAGIC_CRI_ACB, MAGIC_CRI_AWB):
+                                                    continue
+                                        except Exception:
+                                            continue
 
-                try:
-                    sz = os.path.getsize(fpath)
-                    if sz > 0:
-                        file_list.append((fpath, fname, sz))
-                        total_size += sz
-                except Exception:
-                    pass
+                                sz = entry.stat(follow_symlinks=False).st_size
+                                if sz > 0:
+                                    file_list.append((fpath, fname, sz))
+                                    total_size += sz
+
+                                    curr_count = len(file_list)
+                                    now = time.time()
+                                    if scan_progress_callback and (now - last_callback_time >= 0.15):
+                                        scan_progress_callback(curr_count, total_size)
+                                        last_callback_time = now
+
+                                    if curr_count - last_log_milestone >= 20000:
+                                        logger.info(
+                                            f"[Step 1/2] Discovered {curr_count:,} assets "
+                                            f"({total_size / (1024 ** 3):.2f} GB) in source directory..."
+                                        )
+                                        last_log_milestone = curr_count
+                        except OSError:
+                            continue
+            except OSError:
+                continue
 
         total_files = len(file_list)
+        if scan_progress_callback:
+            scan_progress_callback(total_files, total_size)
+
         logger.info(f"Found {total_files:,} asset files ({total_size / (1024 ** 3):.2f} GB total)")
 
         if total_files == 0:
@@ -176,6 +220,8 @@ class BatchExtractionEngine:
             return
 
         logger.info("Step 2: Starting multithreaded decryption and extraction...")
+        if progress_callback:
+            progress_callback(0, total_files, 0, 0)
         success_count = 0
         skipped_count = 0
         video_count = 0

@@ -32,6 +32,7 @@ from ff7ec.config.manager import (
     load_config,
     save_config,
     get_app_icon_path,
+    get_initial_mapping_path,
 )
 from ff7ec.common.logger import setup_logger
 from ff7ec.tools.locator import ToolManager
@@ -439,16 +440,32 @@ def launch_gui():
     if v_found and not var_vgmstream.get():
         var_vgmstream.set(v_found)
 
+    def on_scan_progress(count: int, total_bytes: int):
+        def _do():
+            size_gb = total_bytes / (1024 ** 3)
+            lbl_status.config(
+                text=f"Step 1/2: Scanning asset directory... {count:,} files found ({size_gb:.2f} GB)"
+            )
+        root.after(0, _do)
+
     def update_progress(curr, total, success, skipped):
         def _do():
-            prog_bar["maximum"] = total
+            if str(prog_bar.cget("mode")) != "determinate":
+                prog_bar.stop()
+                prog_bar.config(mode="determinate")
+            prog_bar["maximum"] = max(1, total)
             prog_bar["value"] = curr
             pct = (curr / total * 100) if total > 0 else 0
-            lbl_status.config(text=f"Progress: {curr:,}/{total:,} ({pct:.1f}%) | Success: {success:,} | Skipped: {skipped:,}")
+            lbl_status.config(
+                text=f"Step 2/2: Progress: {curr:,}/{total:,} ({pct:.1f}%) | Success: {success:,} | Skipped: {skipped:,}"
+            )
         root.after(0, _do)
 
     def set_buttons_running(running: bool):
         def _do():
+            if not running and str(prog_bar.cget("mode")) == "indeterminate":
+                prog_bar.stop()
+                prog_bar.config(mode="determinate")
             state_run = tk.DISABLED if running else tk.NORMAL
             state_active = tk.NORMAL if running else tk.DISABLED
             btn_start.config(state=state_run)
@@ -468,11 +485,15 @@ def launch_gui():
     def toggle_pause():
         if pause_event.is_set():
             pause_event.clear()
+            if str(prog_bar.cget("mode")) == "indeterminate":
+                prog_bar.stop()
             btn_pause.config(text="▶  Resume")
             lbl_status.config(text="Process PAUSED. Click 'Resume' to continue.")
             append_log("WARNING", "[!] Process PAUSED by user.")
         else:
             pause_event.set()
+            if str(prog_bar.cget("mode")) == "indeterminate":
+                prog_bar.start(10)
             btn_pause.config(text="⏸  Pause")
             lbl_status.config(text="Process RESUMED.")
             append_log("INFO", "[+] Process RESUMED.")
@@ -519,9 +540,38 @@ def launch_gui():
             messagebox.showerror("Error", f"Source directory does not exist:\n{src}")
             return
 
+        # Validate octocacheevai.json presence when extracting bundles
+        if scope_val in (DEFAULT_SCOPE, SCOPE_BUNDLES_ONLY):
+            has_valid_mapping = mapping and os.path.isfile(mapping) and os.path.getsize(mapping) > 0
+            if not has_valid_mapping:
+                auto_map = get_initial_mapping_path()
+                if auto_map and os.path.isfile(auto_map) and os.path.getsize(auto_map) > 0:
+                    mapping = auto_map
+                    var_mapping.set(auto_map)
+                    config["mapping_path"] = auto_map
+                    save_config(config)
+                    logger.info(f"Auto-detected asset mapping database: {auto_map}")
+                else:
+                    err_msg = (
+                        "Missing 'octocacheevai.json' Database!\n\n"
+                        "Cannot decrypt Asset Bundles (3D models, textures, animations) without 'octocacheevai.json'.\n"
+                        "The Applibot XOR cipher requires the asset database to resolve decryption keys for each file.\n\n"
+                        "Would you like to build and download the database via game API now?"
+                    )
+                    logger.error("================================================================================")
+                    logger.error("[ERROR] Missing 'octocacheevai.json' database! Cannot decrypt Asset Bundles.")
+                    logger.error("[ERROR] Please click '⚡ Build Database' or select a valid octocacheevai.json file.")
+                    logger.error("================================================================================")
+                    if messagebox.askyesno("Missing Database (octocacheevai.json)", err_msg):
+                        _build_map_native()
+                    return
+
         stop_event.clear()
         pause_event.set()
         set_buttons_running(True)
+        prog_bar.config(mode="indeterminate")
+        prog_bar.start(10)
+        lbl_status.config(text="Step 1/2: Scanning source directory for asset files...")
 
         def _work():
             try:
@@ -542,6 +592,7 @@ def launch_gui():
                     stop_event=stop_event,
                     pause_event=pause_event,
                     progress_callback=update_progress,
+                    scan_progress_callback=on_scan_progress,
                 )
             finally:
                 set_buttons_running(False)
@@ -579,6 +630,9 @@ def launch_gui():
         stop_event.clear()
         pause_event.set()
         set_buttons_running(True)
+        prog_bar.config(mode="indeterminate")
+        prog_bar.start(10)
+        lbl_status.config(text="Scanning output directory for USM video cutscenes...")
 
         def _work():
             try:
@@ -623,6 +677,9 @@ def launch_gui():
         stop_event.clear()
         pause_event.set()
         set_buttons_running(True)
+        prog_bar.config(mode="indeterminate")
+        prog_bar.start(10)
+        lbl_status.config(text="Scanning output directory for audio banks (ACB/AWB)...")
 
         def _work():
             try:
@@ -662,6 +719,9 @@ def launch_gui():
         stop_event.clear()
         pause_event.set()
         set_buttons_running(True)
+        prog_bar.config(mode="indeterminate")
+        prog_bar.start(10)
+        lbl_status.config(text="Scanning output directory for USM cutscenes to extract audio...")
 
         def _work():
             try:

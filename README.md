@@ -2,6 +2,7 @@
 
 > **All-in-One Asset Decryptor, Extractor, Audio Decoder & Video Transcoder for *Final Fantasy VII: Ever Crisis***
 
+[![Release](https://img.shields.io/badge/Release-v2.1.0-blue.svg)](https://github.com/InIntRios/ff7ecdecryptor/releases)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue.svg)](https://www.microsoft.com/windows)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-brightgreen.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -191,7 +192,7 @@ Simply double-click or run:
 This batch script automatically:
 1. Verifies Python 3.10+ and installs/updates `pyinstaller` if missing.
 2. Extracts high-resolution multi-size icons directly from `FF7EC.exe` into `app.ico`.
-3. Compiles `FF7EC_Decryptor.exe` with `FF7EC_Decryptor.spec` and copies it directly to the project root.
+3. Compiles `FF7EC_Decryptor.exe` with `FF7EC_Decryptor.spec` (UPX disabled, Windows version info and manifest embedded).
 
 ### Method B: Manual PyInstaller Build
 ```powershell

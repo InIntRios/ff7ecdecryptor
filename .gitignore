@@ -1,9 +1,12 @@
 # Build and distribution directories
 build/
 dist/
+build_nuitka/
 
-# Tools directory
-tools/
+# Tools directory (binaries ignored, scripts tracked)
+tools/*
+!tools/*.ps1
+!tools/*.py
 
 # Executables and logs
 *.exe
@@ -16,3 +19,5 @@ ff7ec_config.json
 __pycache__/
 *.py[cod]
 *$py.class
+data/octo/octocacheevai.json
+data/octo/octocacheevai.bin

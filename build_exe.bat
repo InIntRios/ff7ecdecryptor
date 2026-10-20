@@ -58,7 +58,13 @@ if %ERRORLEVEL% neq 0 (
 if exist "dist\FF7EC_Decryptor.exe" (
     echo.
     echo [*] Copying compiled executable to root directory...
+    taskkill /f /im FF7EC_Decryptor.exe >nul 2>nul
     copy /y "dist\FF7EC_Decryptor.exe" ".\FF7EC_Decryptor.exe" >nul
+    :: 6. Apply Authenticode digital signature & timestamp
+    echo [*] Applying Authenticode digital signature and timestamp...
+    if exist "tools\sign_exe.ps1" (
+        powershell -NoProfile -ExecutionPolicy Bypass -File "tools\sign_exe.ps1" -FilePath ".\FF7EC_Decryptor.exe"
+    )
     ie4uinit.exe -show >nul 2>nul
     python -c "import ctypes; ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)" >nul 2>nul
     echo.

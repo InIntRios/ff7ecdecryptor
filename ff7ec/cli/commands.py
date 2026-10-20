@@ -26,7 +26,7 @@ from ff7ec.constants import (
     SCOPE_BUNDLES_ONLY,
     TOOLS_DIR,
 )
-from ff7ec.config.manager import load_config
+from ff7ec.config.manager import load_config, get_initial_mapping_path
 from ff7ec.common.logger import setup_logger
 from ff7ec.crypto.cipher import decrypt_asset_bundle
 from ff7ec.tools.locator import ensure_tools
@@ -219,6 +219,15 @@ class CliApp:
 
             conv_v = (not parsed.no_video) if scope != SCOPE_AUDIO_ONLY else False
             conv_a = (not parsed.no_audio) if scope != SCOPE_VIDEO_ONLY else False
+
+            if scope == SCOPE_BUNDLES_ONLY:
+                map_check = parsed.mapping or get_initial_mapping_path()
+                if not map_check or not os.path.isfile(map_check) or os.path.getsize(map_check) == 0:
+                    logger.error("================================================================================")
+                    logger.error("[ERROR] Cannot decrypt Asset Bundles without 'octocacheevai.json' database!")
+                    logger.error("[ERROR] Please run 'python ff7ec_decryptor.py build-mapping' first to generate it.")
+                    logger.error("================================================================================")
+                    return 1
 
             stop_evt = threading.Event()
             pause_evt = threading.Event()
